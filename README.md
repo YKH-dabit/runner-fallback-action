@@ -78,7 +78,7 @@ jobs:
         run: sleep 15
       - name: Use self-hosted runner if online and not busy, otherwise public runner
         id: set-runner
-        uses: YKH-dabit/runner-fallback-action@b341ff9556afd28383d911a7501a79ef3aeda38e # pinned commit; no tagged release yet
+        uses: YKH-dabit/runner-fallback-action@v1
         with:
           organization: "ankidroid"
           # list of tags a runner must match to be considered a primary
