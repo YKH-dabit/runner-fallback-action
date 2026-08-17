@@ -61,26 +61,58 @@ async function checkRunner({
   return { useRunner: JSON.stringify(useRunner.split(",")), primaryIsOnline, sufficientPrimaries };
 }
 
-async function main() {
-  const githubRepository = process.env.GITHUB_REPOSITORY;
-  const organization = core.getInput('organization', { required: false });
-  const enterprise = core.getInput('enterprise', { required: false });
-  const [owner, repo] = githubRepository.split("/");
-  if (organization && enterprise) {
-    throw new Error('You cannot specify both organization and enterprise inputs. Please choose one.');
+// Writing the job summary is best-effort: a summary failure must never change
+// the outcome of the step (the runner output may already have been decided).
+async function writeSummarySafe(text) {
+  try {
+    core.summary.addRaw(text);
+    await core.summary.write();
+  } catch (summaryError) {
+    core.warning(`Failed to write job summary: ${summaryError.message || summaryError}`);
   }
-  let apiPath = `repos/${owner}/${repo}/actions/runners`;
-  if (organization) {
-    apiPath = `orgs/${organization}/actions/runners`;
-  } else if (enterprise) {
-    apiPath = `enterprises/${enterprise}/actions/runners`;
-  }
+}
 
-  const fallbackOnError = core.getBooleanInput('fallback-on-error', { required: false });
+// Single path for emitting the fallback runner output. `fallback-runner` is a
+// comma-separated label list just like `primary-runner`, so it must be
+// comma-split the same way the success path splits `primaryRunnerLabels`.
+function emitFallbackRunner(fallbackRunner) {
+  core.setOutput('use-runner', JSON.stringify(fallbackRunner.split(',')));
+}
+
+async function main() {
+  // Defaults are chosen so that any error thrown before these are resolved
+  // (e.g. a malformed `fallback-on-error` value) can never be mistaken for an
+  // authorized "use the fallback" signal: fallbackOnError defaults to false,
+  // and fallbackRunner stays undefined until it is actually read.
+  let fallbackOnError = false;
   let fallbackRunner;
 
   try {
+    // Read the two inputs that decide the failure path *before* anything that
+    // can throw, so that if something below does throw, the catch block below
+    // knows the real fallback-on-error / fallback-runner values rather than
+    // treating an unrelated failure as "unknowable" fallback intent.
+    fallbackOnError = core.getBooleanInput('fallback-on-error', { required: false });
     fallbackRunner = core.getInput('fallback-runner', { required: true });
+
+    const githubRepository = process.env.GITHUB_REPOSITORY;
+    if (!githubRepository) {
+      throw new Error('GITHUB_REPOSITORY environment variable is not set.');
+    }
+    const [owner, repo] = githubRepository.split("/");
+
+    const organization = core.getInput('organization', { required: false });
+    const enterprise = core.getInput('enterprise', { required: false });
+    if (organization && enterprise) {
+      throw new Error('You cannot specify both organization and enterprise inputs. Please choose one.');
+    }
+
+    let apiPath = `repos/${owner}/${repo}/actions/runners`;
+    if (organization) {
+      apiPath = `orgs/${organization}/actions/runners`;
+    } else if (enterprise) {
+      apiPath = `enterprises/${enterprise}/actions/runners`;
+    }
 
     const inputs = {
       apiPath,
@@ -93,42 +125,38 @@ async function main() {
     const { useRunner, primaryIsOnline, sufficientPrimaries, error } = await checkRunner(inputs);
 
     if (error) {
-      if (fallbackOnError !== true) {
-        core.setFailed(error);
-        return;
-      } else {
-        core.warning('Checking for available runners failed, but fallback-on-error is true');
-        core.warning(`Original error: ${error}`);
-        core.warning(`using runner: ${fallbackRunner}`);
-        core.summary.addRaw(`Selected runner ${fallbackRunner}. Check log for details.`);
-        core.summary.write();
-        core.setOutput('use-runner', [fallbackRunner] );
-        return;
-      }
+      throw new Error(error);
     }
 
     core.info(`Primary runner is online: ${primaryIsOnline}`);
     core.info(`Sufficient primary runners available: ${sufficientPrimaries}`);
     core.info(`Using runner: ${useRunner}`);
-    core.summary.addRaw(`Selected runner ${useRunner}. Check log for details.`);
-    core.summary.write();
+    await writeSummarySafe(`Selected runner ${useRunner}. Check log for details.`);
     core.setOutput('use-runner', useRunner);
   } catch (error) {
-    if (fallbackRunner === undefined || fallbackOnError !== true) {
-      core.setFailed(error);
-    } else {
-      core.warning('Checking for available runners failed, but fallback-on-error is true');
-      core.warning(`Original error: ${error}`);
+    // A malformed fallback-on-error value throws out of getBooleanInput above
+    // before fallbackRunner is even read, so fallbackRunner stays undefined
+    // here and this always falls through to the clean setFailed below -
+    // an unreadable flag can never be treated as "true".
+    if (fallbackRunner !== undefined && fallbackOnError === true) {
+      core.warning('Runner selection failed, but fallback-on-error is true - using the fallback runner');
+      core.warning(`Original error: ${error.message || error}`);
       core.warning(`using runner: ${fallbackRunner}`);
-      core.summary.addRaw(`Selected runner ${fallbackRunner}. Check log for details.`);
-      core.summary.write();
-      core.setOutput('use-runner', [fallbackRunner]);
+      await writeSummarySafe(`Selected runner ${fallbackRunner}. Check log for details.`);
+      emitFallbackRunner(fallbackRunner);
+    } else {
+      core.setFailed(error.message || String(error));
     }
   }
 }
 
-module.exports = { checkRunner };
+module.exports = { checkRunner, main };
 
 if (require.main === module) {
-  main();
+  main().catch((error) => {
+    // Defensive top-level guard: main() already catches everything internally,
+    // but this ensures no failure mode can ever surface as an unhandled
+    // rejection (fatal on Node 24) even if that invariant is broken later.
+    core.setFailed(error instanceof Error ? error.message : String(error));
+  });
 }
