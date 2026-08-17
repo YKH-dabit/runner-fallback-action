@@ -83,10 +83,14 @@ async function checkRunner({
     // 401 / 403 / 5xx land here as a thrown HttpClientError. Transport
     // failures (DNS, TLS, timeout) reject with no statusCode - those keep
     // their own message rather than claiming a status code they don't have.
+    // `cause` keeps the original HttpClientError - and its stack - reachable
+    // for anyone debugging from a log, while the message stays exactly as it
+    // was: the message is what lands in the failure annotation, and it must
+    // never carry request details, headers included.
     if (typeof httpError.statusCode !== 'number') {
-      throw new Error(`Failed to get runners: ${httpError.message || httpError}`);
+      throw new Error(`Failed to get runners: ${httpError.message || httpError}`, { cause: httpError });
     }
-    throw new Error(formatRunnersFetchError(httpError.statusCode, httpError.message));
+    throw new Error(formatRunnersFetchError(httpError.statusCode, httpError.message), { cause: httpError });
   }
 
   if (response.statusCode !== 200) {
