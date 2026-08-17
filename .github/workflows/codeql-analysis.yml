@@ -9,16 +9,23 @@
 # the `language` matrix defined below to confirm you have the correct set of
 # supported CodeQL languages.
 #
+# ******** WHY THIS RUNS ON workflow_dispatch ONLY (not push/pull_request/schedule) ********
+# This is inherited state from before this repository was public, and it is a
+# known gap rather than a standing decision. On a private repo without a Code
+# Security / GHAS entitlement, `Perform CodeQL Analysis` always failed at the
+# SARIF-upload step -- the scan itself ran to completion (extraction, autobuild,
+# query evaluation) and only the upload call 403'd -- so running it on every
+# push/PR burned CI producing a report that could never be uploaded.
+#
+# Code scanning is free on public repositories, so that constraint no longer
+# applies and these triggers should be restored. Re-enabling is a one-line
+# change: restore the `push` / `pull_request` / `schedule` triggers below. Left
+# as a follow-up so that this migration does not also change what CI runs.
+#
 name: "CodeQL"
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    # The branches below must be a subset of the branches above
-    branches: [ main ]
-  schedule:
-    - cron: '24 5 * * 6'
+  workflow_dispatch: {}
 
 jobs:
   analyze:
@@ -38,11 +45,11 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v2
+      uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
       with:
         languages: ${{ matrix.language }}
         config-file: ./.github/codeql/codeql-config.yml
@@ -54,7 +61,7 @@ jobs:
     # Autobuild attempts to build any compiled languages  (C/C++, C#, or Java).
     # If this step fails, then you should remove it and run the build manually (see below)
     - name: Autobuild
-      uses: github/codeql-action/autobuild@v2
+      uses: github/codeql-action/autobuild@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
 
     # ℹ️ Command-line programs to run using the OS shell.
     # 📚 https://git.io/JvXDl
@@ -68,4 +75,4 @@ jobs:
     #   make release
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v2
+      uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7

@@ -15,7 +15,7 @@ jobs:
   units:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     # --ignore-scripts: this job runs on pull_request against PR-supplied
     # package.json/package-lock.json, so we must not execute arbitrary
     # install-time lifecycle scripts from untrusted PR content.
@@ -50,7 +50,7 @@ jobs:
       env:
         TOKEN_SET: ${{ secrets.TEST_GITHUB_TOKEN != '' }}
       run: echo "has-token=$TOKEN_SET" >> "$GITHUB_OUTPUT"
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       if: steps.check-token.outputs.has-token == 'true'
     - id: test-action
       if: steps.check-token.outputs.has-token == 'true'
@@ -88,7 +88,7 @@ jobs:
       env:
         TOKEN_SET: ${{ secrets.TEST_GITHUB_TOKEN != '' }}
       run: echo "has-token=$TOKEN_SET" >> "$GITHUB_OUTPUT"
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       if: steps.check-token.outputs.has-token == 'true'
     - id: test-action
       if: steps.check-token.outputs.has-token == 'true'
