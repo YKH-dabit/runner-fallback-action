@@ -35,7 +35,7 @@
     "@actions/core": "^1.11.1",
     "@actions/http-client": "^3.0.2"
   },
-  "//overrides": "Pins undici to a maintained 6.x line because @actions/core 1.11.1 nests its own @actions/http-client@^2.0.1, which still resolves undici ^5.28.5 (EOL, unpatched). Remove this override once @actions/core no longer pulls in a @actions/http-client that depends on undici 5.x.",
+  "//overrides": "Pins undici to a maintained 6.x line because @actions/core 1.11.1 nests its own @actions/http-client@^2.0.1, which still resolves undici ^5.28.5 (EOL, unpatched). Remove this override once @actions/core no longer pulls in a @actions/http-client that depends on undici 5.x. Note that 6.x is itself two majors behind and will eventually hit the same dead end: 7.x/8.x require @actions/http-client v4, which is ESM-only and unusable from this CommonJS codebase, so there is no in-range escape once 6.x goes EOL. Issue #8 tracks that and holds the exit plan; .github/dependabot.yml ignores major bumps of @actions/core and @actions/http-client for the same reason.",
   "overrides": {
     "undici": "^6.28.0"
   },
