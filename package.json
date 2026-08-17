@@ -33,7 +33,11 @@
   "homepage": "https://github.com/mikehardy/runner-fallback-action#readme",
   "dependencies": {
     "@actions/core": "^1.11.1",
-    "@actions/http-client": "^3.0.0"
+    "@actions/http-client": "^3.0.2"
+  },
+  "//overrides": "Pins undici to a maintained 6.x line because @actions/core 1.11.1 nests its own @actions/http-client@^2.0.1, which still resolves undici ^5.28.5 (EOL, unpatched). Remove this override once @actions/core no longer pulls in a @actions/http-client that depends on undici 5.x.",
+  "overrides": {
+    "undici": "^6.28.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
