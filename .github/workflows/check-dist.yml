@@ -6,14 +6,23 @@
 name: Check dist/
 
 on:
+  # `paths-ignore` is fine here: nothing requires this run.
   push:
     branches:
       - main
     paths-ignore:
       - '**.md'
+  # No `paths-ignore` on `pull_request`, deliberately. `check-dist` is a
+  # required status check on `main` and `releases/*` (repository ruleset
+  # "protected-refs"), and a path filter stops the workflow from triggering
+  # at all -- so the required check never reports and a Markdown-only PR
+  # sits on "Expected -- waiting for status" forever, unmergeable. Note the
+  # difference from the token-gated jobs in test.yml: a job skipped by an
+  # `if:` condition still reports a (successful) conclusion, so those are
+  # safe to gate; a workflow skipped by a path filter reports nothing at
+  # all. Keep this trigger unfiltered for as long as `check-dist` is a
+  # required check.
   pull_request:
-    paths-ignore:
-      - '**.md'
   workflow_dispatch:
 
 # Least-privilege default: this job only reads and compares files, it never
