@@ -17,8 +17,11 @@ on:
   pull_request_target:
     types: [opened, synchronize]
 
-permissions:
-  contents: read
+# No `permissions:` block, deliberately: that alone is
+# `actions/missing-workflow-permissions`, a purely syntactic query in the default
+# suite. It is the positive control for "does the actions analysis report
+# anything at all", independent of whether the code-injection query's critical
+# threshold is met.
 
 jobs:
   deliberately-unsafe:

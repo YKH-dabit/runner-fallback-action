@@ -1,5 +1,14 @@
 name: "javascript-action CodeQL config"
 
-paths-ignore: 
+paths-ignore:
   - node_modules
   - dist
+
+# SCRATCH - being evaluated on this branch. CodeQL's default threat model is
+# `remote` only, which means process.env / process.argv are not treated as
+# attacker-controlled. For a GitHub Action that is backwards: `core.getInput`
+# reads INPUT_* environment variables, so the environment *is* this program's
+# untrusted input channel, and under the default model the JavaScript security
+# queries have almost nothing to bite on.
+threat-models:
+  - local
