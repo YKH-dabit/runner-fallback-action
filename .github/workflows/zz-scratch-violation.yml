@@ -1,14 +1,21 @@
 # SCRATCH FILE - DO NOT MERGE.
 #
-# Exists only to prove that the `actions` CodeQL analysis added in #11 actually
-# reports something. The `run:` step below interpolates a pull request title
-# straight into a shell command, which is the textbook script-injection pattern
-# (`actions/script-injection`). `workflow_dispatch` only, so nothing ever
-# executes it - CodeQL analyses the file statically either way.
+# Exists only to prove that the `actions` CodeQL analysis added in #11 reports
+# something. The `run:` step interpolates a pull request title straight into a
+# shell command; `actions/script-injection` only treats that as a finding when
+# the workflow is triggered by an event an attacker controls, which is why this
+# uses `pull_request_target` rather than the `workflow_dispatch` a first attempt
+# used (that version was correctly *not* flagged - with no untrusted trigger it
+# is not a vulnerability).
+#
+# This file cannot execute from a pull request branch: `pull_request_target`
+# always runs the base branch's copy of a workflow, and this copy exists only on
+# the scratch branch, which is never merged.
 name: "SCRATCH: deliberate script injection"
 
 on:
-  workflow_dispatch: {}
+  pull_request_target:
+    types: [opened, synchronize]
 
 permissions:
   contents: read

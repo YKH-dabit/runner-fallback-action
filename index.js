@@ -150,16 +150,26 @@ function emitFallbackRunner(fallbackRunner) {
   core.setOutput('use-runner', JSON.stringify(splitLabels(fallbackRunner)));
 }
 
-// SCRATCH - DO NOT MERGE. Two deliberate violations, to prove the analyses
-// added in #11 actually fail CI rather than reporting nothing:
+// SCRATCH - DO NOT MERGE. Deliberate violations, to prove the analyses added in
+// #11 actually report something rather than silently finding nothing:
 //   * `unusedScratchVariable` violates eslint:recommended's no-unused-vars.
-//   * `eval` of an action input is a code-injection path for CodeQL's
-//     javascript queries (js/code-injection).
+//   * Building a shell command out of an environment variable is
+//     js/shell-command-injection-from-environment - process.env IS a modeled
+//     source, unlike core.getInput, which a first attempt wrongly assumed.
+//   * An unanchored hostname regexp is js/incomplete-hostname-regexp, which is
+//     purely syntactic and needs no taint source at all.
+const { execSync } = require('child_process');
+
 const unusedScratchVariable = 'this should fail lint';
 
-function scratchDeliberateCodeInjection() {
-  const untrusted = core.getInput('primary-runner', { required: false });
-  return eval(untrusted);
+function scratchShellInjectionFromEnvironment() {
+  return execSync('echo ' + process.env.SCRATCH_UNTRUSTED);
+}
+
+const scratchHostnameRegexp = /github.com/;
+
+function scratchHostCheck(url) {
+  return scratchHostnameRegexp.test(url);
 }
 
 async function main() {
