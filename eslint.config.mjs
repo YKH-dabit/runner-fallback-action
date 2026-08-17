@@ -1,20 +1,16 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import js from "@eslint/js";
-import { FlatCompat } from "@eslint/eslintrc";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const compat = new FlatCompat({
-    baseDirectory: __dirname,
-    recommendedConfig: js.configs.recommended,
-    allConfig: js.configs.all
-});
-
+// `js.configs.recommended` is used directly rather than through
+// @eslint/eslintrc's FlatCompat. The compat layer exists to read the old
+// `.eslintrc` format, and it validates whatever it is handed against the old
+// schema -- so `compat.extends("eslint:recommended")` broke outright on
+// @eslint/js 10, which adds a top-level `name` to its shared configs:
+// `Unexpected top-level property "name"`. Nothing here needs eslintrc
+// semantics, so the layer is gone and @eslint/eslintrc with it.
 export default defineConfig([globalIgnores(["**/dist/"]), {
-    extends: compat.extends("eslint:recommended"),
+    extends: [js.configs.recommended],
     ignores: [
         "eslint.config.mjs",
         "dist/"
