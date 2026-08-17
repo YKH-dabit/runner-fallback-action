@@ -6,49 +6,100 @@ on:
       - main
       - 'releases/*'
 
+# Least-privilege default: no job here needs to write anything, only checkout.
+permissions:
+  contents: read
+
 jobs:
   # unit tests
   units:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - run: npm ci
+    # --ignore-scripts: this job runs on pull_request against PR-supplied
+    # package.json/package-lock.json, so we must not execute arbitrary
+    # install-time lifecycle scripts from untrusted PR content.
+    - run: npm ci --ignore-scripts
     - run: npm test
 
-  # test action works running from the graph
+  # Test the action works running from the graph.
+  #
+  # Runs only on `push` (never `pull_request`): TEST_GITHUB_TOKEN needs
+  # org-admin scope (see README), and `uses: ./` executes *this run's own*
+  # dist/index.js. Handing an org-admin token to a pull_request-triggered
+  # run would let anyone who can push a branch exfiltrate it via a modified
+  # dist/index.js in the PR. Restricting to `push` means only code that has
+  # already landed on `main` / `releases/*` ever sees the token — an
+  # audited, revertible commit instead of a silent PR branch. `main` has no
+  # branch protection today, so this is a push-gate, not yet a review gate;
+  # once branch protection is enabled on those refs, this also means only
+  # reviewed code (see the follow-up on enabling it).
+  #
+  # When TEST_GITHUB_TOKEN isn't configured (e.g. this fork, which
+  # deliberately hasn't been given the secret yet), the token-dependent
+  # steps are skipped instead of failing, so the job doesn't become a
+  # permanently-red required check that trains reviewers to ignore CI.
   test:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
     outputs:
       use-runner: ${{ steps.test-action.outputs.use-runner }}
     steps:
+    - name: Check TEST_GITHUB_TOKEN availability
+      id: check-token
+      env:
+        TOKEN_SET: ${{ secrets.TEST_GITHUB_TOKEN != '' }}
+      run: echo "has-token=$TOKEN_SET" >> "$GITHUB_OUTPUT"
     - uses: actions/checkout@v4
+      if: steps.check-token.outputs.has-token == 'true'
     - id: test-action
+      if: steps.check-token.outputs.has-token == 'true'
       uses: ./
       with:
         primary-runner: 'self-hosted,linux'
         fallback-runner: 'ubuntu-latest'
         github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
     - name: Check output
-      run: echo "Runner to use is ${{ steps.test-action.outputs.use-runner }}"        
+      if: steps.check-token.outputs.has-token == 'true'
+      run: echo "Runner to use is ${{ steps.test-action.outputs.use-runner }}"
+    - name: Skip notice
+      if: steps.check-token.outputs.has-token != 'true'
+      run: echo "::notice::TEST_GITHUB_TOKEN is not configured on this repo/fork; skipping token-dependent steps in the 'test' job."
 
   test-output:
     needs: test
-    runs-on: ${{ fromJson(needs.test.outputs.use-runner )}}
+    # test's steps are skipped whenever the secret is absent, which leaves
+    # use-runner empty; guard against fromJson('') rather than failing.
+    if: needs.test.outputs.use-runner != ''
+    runs-on: ${{ fromJson(needs.test.outputs.use-runner) }}
     steps:
       - name: Do something
         run: echo "Doing something on ${{ needs.test.outputs.use-runner }}"
 
+  # Same rationale and skip behavior as `test` above.
   test-multiple-labels:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
     outputs:
       use-runner: ${{ steps.test-action.outputs.use-runner }}
     steps:
+    - name: Check TEST_GITHUB_TOKEN availability
+      id: check-token
+      env:
+        TOKEN_SET: ${{ secrets.TEST_GITHUB_TOKEN != '' }}
+      run: echo "has-token=$TOKEN_SET" >> "$GITHUB_OUTPUT"
     - uses: actions/checkout@v4
+      if: steps.check-token.outputs.has-token == 'true'
     - id: test-action
+      if: steps.check-token.outputs.has-token == 'true'
       uses: ./
       with:
         primary-runner: 'self-hosted,linux'
         fallback-runner: 'linux,x64'
         github-token: ${{ secrets.TEST_GITHUB_TOKEN }}
     - name: Check output
-      run: echo "Runner to use is ${{ steps.test-action.outputs.use-runner }}"        
+      if: steps.check-token.outputs.has-token == 'true'
+      run: echo "Runner to use is ${{ steps.test-action.outputs.use-runner }}"
+    - name: Skip notice
+      if: steps.check-token.outputs.has-token != 'true'
+      run: echo "::notice::TEST_GITHUB_TOKEN is not configured on this repo/fork; skipping token-dependent steps in the 'test-multiple-labels' job."

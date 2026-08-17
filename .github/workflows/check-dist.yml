@@ -16,6 +16,11 @@ on:
       - '**.md'
   workflow_dispatch:
 
+# Least-privilege default: this job only reads and compares files, it never
+# pushes or writes anything back to the repo.
+permissions:
+  contents: read
+
 jobs:
   check-dist:
     runs-on: ubuntu-latest
@@ -29,7 +34,12 @@ jobs:
           node-version: 24.x
 
       - name: Install dependencies
-        run: npm ci
+        # --ignore-scripts: this job runs on pull_request against PR-supplied
+        # package.json/package-lock.json; dist/ is rebuilt via the explicit
+        # `npm run prepare` step below, not an install lifecycle hook, so we
+        # don't need to execute arbitrary install-time scripts from
+        # untrusted PR content.
+        run: npm ci --ignore-scripts
 
       - name: Rebuild the dist/ directory
         run: npm run prepare
