@@ -7,6 +7,55 @@ require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 const core = __nccwpck_require__(7484);
 const httpClient = __nccwpck_require__(4844);
 
+// GitHub org / user / enterprise names: alphanumeric, single hyphens only, no
+// leading/trailing hyphen, 1-39 chars. This is the same shape GitHub enforces
+// for org and user names; enterprise slugs are a subset of it. Rejecting
+// anything outside this shape closes the `organization: "../../zen"`-style
+// path-injection into the API URL below - the value can only ever become one
+// path segment.
+const GITHUB_NAME_PATTERN = /^[a-zA-Z\d](?:[a-zA-Z\d]|-(?=[a-zA-Z\d])){0,38}$/;
+
+function assertValidGithubName(name, inputName) {
+  if (!GITHUB_NAME_PATTERN.test(name)) {
+    throw new Error(
+      `Invalid ${inputName}: "${name}" is not a valid GitHub name (letters, digits, and single internal hyphens only; no leading/trailing hyphen).`
+    );
+  }
+}
+
+// Shared by every place a comma-separated label list is turned into an array:
+// primary-runner at read time, and fallback-runner on both the success path
+// (useRunner may fall through to the raw fallback string) and the
+// fallback-on-error path in emitFallbackRunner. A label with stray
+// whitespace (e.g. 'self-hosted, linux') must match the same runner as one
+// without it.
+function splitLabels(commaSeparated) {
+  return commaSeparated.split(',').map((label) => label.trim());
+}
+
+// `primaries-required` is optional. `core.getInput` returns '' (never
+// `undefined`) when the input is unset, so unset must be recognized
+// explicitly rather than via `!== undefined` - otherwise unset silently
+// takes the "count busy primaries against a threshold" branch with an empty
+// string as the threshold. Unset means "no minimum requested": any online
+// primary is used regardless of how busy it is, matching the README's
+// description of `primaries-required` as an opt-in check. When set, it must
+// be a positive integer; anything else is a configuration error, not a
+// silently-ignored value.
+function parsePrimariesRequired(rawValue) {
+  if (rawValue === '' || rawValue === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(
+      `Invalid primaries-required: "${rawValue}" must be a positive integer.`
+    );
+  }
+  return parsed;
+}
+
 async function checkRunner({
   token,
   primaryRunnerLabels,
@@ -64,7 +113,7 @@ async function checkRunner({
   }
 
   // return a JSON string so that it can be parsed using `fromJson`, e.g. fromJson('["self-hosted", "linux"]')
-  return { useRunner: JSON.stringify(useRunner.split(",")), primaryIsOnline, sufficientPrimaries };
+  return { useRunner: JSON.stringify(splitLabels(useRunner)), primaryIsOnline, sufficientPrimaries };
 }
 
 // Writing the job summary is best-effort: a summary failure must never change
@@ -82,7 +131,7 @@ async function writeSummarySafe(text) {
 // comma-separated label list just like `primary-runner`, so it must be
 // comma-split the same way the success path splits `primaryRunnerLabels`.
 function emitFallbackRunner(fallbackRunner) {
-  core.setOutput('use-runner', JSON.stringify(fallbackRunner.split(',')));
+  core.setOutput('use-runner', JSON.stringify(splitLabels(fallbackRunner)));
 }
 
 async function main() {
@@ -112,6 +161,12 @@ async function main() {
     if (organization && enterprise) {
       throw new Error('You cannot specify both organization and enterprise inputs. Please choose one.');
     }
+    if (organization) {
+      assertValidGithubName(organization, 'organization');
+    }
+    if (enterprise) {
+      assertValidGithubName(enterprise, 'enterprise');
+    }
 
     let apiPath = `repos/${owner}/${repo}/actions/runners`;
     if (organization) {
@@ -120,12 +175,18 @@ async function main() {
       apiPath = `enterprises/${enterprise}/actions/runners`;
     }
 
+    // Mask immediately after reading, before the token is used anywhere else,
+    // so it is never logged unmasked even when it comes from a non-secret
+    // source (`vars.` or a literal) rather than `secrets.`.
+    const token = core.getInput('github-token', { required: true });
+    core.setSecret(token);
+
     const inputs = {
       apiPath,
-      token: core.getInput('github-token', { required: true }),
-      primaryRunnerLabels: core.getInput('primary-runner', { required: true }).split(','),
+      token,
+      primaryRunnerLabels: splitLabels(core.getInput('primary-runner', { required: true })),
       fallbackRunner,
-      primariesRequired: core.getInput('primaries-required', { required: false }),
+      primariesRequired: parsePrimariesRequired(core.getInput('primaries-required', { required: false })),
     };
 
     const { useRunner, primaryIsOnline, sufficientPrimaries, error } = await checkRunner(inputs);

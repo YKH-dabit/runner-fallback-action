@@ -17,6 +17,7 @@ jest.mock('@actions/core', () => ({
   getBooleanInput: jest.fn(),
   setOutput: jest.fn(),
   setFailed: jest.fn(),
+  setSecret: jest.fn(),
   warning: jest.fn(),
   info: jest.fn(),
   summary: {
@@ -148,6 +149,36 @@ describe('checkRunner', () => {
     });
   });
 
+  it('trims whitespace from a comma-separated fallback runner returned by checkRunner itself', async () => {
+    mockGetJson.mockResolvedValue({
+      statusCode: 200,
+      result: {
+        runners: [
+          {
+            status: 'offline',
+            labels: [
+              { name: 'self-hosted' },
+              { name: 'linux' },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await checkRunner({
+      token: 'fake-token',
+      apiPath: 'repos/fake-owner/fake-repo/actions/runners',
+      primaryRunnerLabels: ['self-hosted', 'linux'],
+      fallbackRunner: 'ubuntu-latest, arm64',
+    });
+
+    expect(result).toEqual({
+      useRunner: '["ubuntu-latest","arm64"]',
+      primaryIsOnline: false,
+      sufficientPrimaries: false,
+    });
+  });
+
   describe('alternative api handling', () => {
     it('should query organization runners if organization is provided', async () => {
       mockGetJson.mockResolvedValue({
@@ -222,6 +253,7 @@ describe('main', () => {
     core.getBooleanInput.mockReset();
     core.setOutput.mockReset();
     core.setFailed.mockReset();
+    core.setSecret.mockReset();
     core.warning.mockReset();
     core.info.mockReset();
     core.summary.addRaw.mockReset();
@@ -325,6 +357,17 @@ describe('main', () => {
     expect(core.setOutput).toHaveBeenCalledWith('use-runner', '["linux","x64"]');
   });
 
+  it('trims whitespace from a comma-separated fallback-runner on the error path just like the success path', async () => {
+    core.getBooleanInput.mockReturnValue(true);
+    setInputs({ 'fallback-runner': 'linux, x64' });
+    mockGetJson.mockResolvedValue({ statusCode: 500 });
+
+    await main();
+
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.setOutput).toHaveBeenCalledWith('use-runner', '["linux","x64"]');
+  });
+
   it('never leaves an unhandled rejection when checkRunner itself throws', async () => {
     core.getBooleanInput.mockReturnValue(false);
     setInputs();
@@ -403,5 +446,139 @@ describe('main', () => {
 
     expect(core.setOutput).not.toHaveBeenCalled();
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('github-token'));
+  });
+
+  it('masks the github-token immediately, regardless of where it came from', async () => {
+    core.getBooleanInput.mockReturnValue(false);
+    setInputs({ 'github-token': 'literal-token-value' });
+    mockGetJson.mockResolvedValue({ statusCode: 200, result: { runners: [] } });
+
+    await main();
+
+    expect(core.setSecret).toHaveBeenCalledWith('literal-token-value');
+  });
+
+  it('trims whitespace from a comma-separated primary-runner on the success path', async () => {
+    core.getBooleanInput.mockReturnValue(false);
+    setInputs({ 'primary-runner': 'self-hosted, linux' });
+    mockGetJson.mockResolvedValue({
+      statusCode: 200,
+      result: {
+        runners: [
+          {
+            status: 'online',
+            busy: false,
+            labels: [
+              { name: 'self-hosted' },
+              { name: 'linux' },
+            ],
+          },
+        ],
+      },
+    });
+
+    await main();
+
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.setOutput).toHaveBeenCalledWith('use-runner', '["self-hosted","linux"]');
+  });
+
+  it.each([
+    ['../../zen', 'organization'],
+    ['org/with/slashes', 'organization'],
+    ['-leading-hyphen', 'organization'],
+    ['trailing-hyphen-', 'organization'],
+  ])('setFailed cleanly when organization is not a valid GitHub name (%s)', async (badValue) => {
+    core.getBooleanInput.mockReturnValue(false);
+    setInputs({ organization: badValue });
+
+    await main();
+
+    expect(core.setOutput).not.toHaveBeenCalled();
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Invalid organization'));
+  });
+
+  it('setFailed cleanly when enterprise is not a valid GitHub name', async () => {
+    core.getBooleanInput.mockReturnValue(false);
+    setInputs({ enterprise: '../../zen' });
+
+    await main();
+
+    expect(core.setOutput).not.toHaveBeenCalled();
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('Invalid enterprise'));
+  });
+
+  it('falls back cleanly when organization is invalid and fallback-on-error is true', async () => {
+    core.getBooleanInput.mockReturnValue(true);
+    setInputs({ organization: '../../zen' });
+
+    await main();
+
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.setOutput).toHaveBeenCalledWith('use-runner', '["ubuntu-latest"]');
+  });
+
+  it.each(['abc', '-1', '0', '1.5'])(
+    'setFailed cleanly when primaries-required is not a positive integer (%s)',
+    async (badValue) => {
+      core.getBooleanInput.mockReturnValue(false);
+      setInputs({ 'primaries-required': badValue });
+
+      await main();
+
+      expect(core.setOutput).not.toHaveBeenCalled();
+      expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('primaries-required'));
+    }
+  );
+
+  it('uses an online primary even if busy when primaries-required is unset (production-shaped empty string input)', async () => {
+    core.getBooleanInput.mockReturnValue(false);
+    setInputs({ 'primaries-required': '' });
+    mockGetJson.mockResolvedValue({
+      statusCode: 200,
+      result: {
+        runners: [
+          {
+            status: 'online',
+            busy: true,
+            labels: [
+              { name: 'self-hosted' },
+              { name: 'linux' },
+            ],
+          },
+        ],
+      },
+    });
+
+    await main();
+
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.setOutput).toHaveBeenCalledWith('use-runner', '["self-hosted","linux"]');
+  });
+
+  it('respects primaries-required when set as the string core.getInput actually returns', async () => {
+    core.getBooleanInput.mockReturnValue(false);
+    setInputs({ 'primaries-required': '2' });
+    mockGetJson.mockResolvedValue({
+      statusCode: 200,
+      result: {
+        runners: [
+          {
+            status: 'online',
+            busy: false,
+            labels: [
+              { name: 'self-hosted' },
+              { name: 'linux' },
+            ],
+          },
+        ],
+      },
+    });
+
+    await main();
+
+    expect(core.setFailed).not.toHaveBeenCalled();
+    // only one non-busy primary available but two are required, so it falls back
+    expect(core.setOutput).toHaveBeenCalledWith('use-runner', '["ubuntu-latest"]');
   });
 });

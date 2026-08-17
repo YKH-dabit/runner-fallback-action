@@ -45,6 +45,9 @@ are not enough free primaries, for example if you are adding self-hosted primari
 | -------------------- | ----------------------------------------------- |
 | `primaries-required` | minimum non-busy primaries count, else fallback |
 
+`primaries-required` must be a positive integer when set. If omitted, no minimum is
+enforced: any online primary is used regardless of how busy it is.
+
 You may want the action to use the fallback runner, if correctly configured, if there are any
 errors at all. This makes it so the action won't block CI runs even if (for example) the
 github token is unavailable or expires. Default is false.
