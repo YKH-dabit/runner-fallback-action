@@ -9,3 +9,20 @@ updates:
     directory: /
     schedule:
       interval: daily
+    ignore:
+      # @actions/core v3 and @actions/http-client v4 are ESM-only: both declare
+      # `"type": "module"` and expose only an `import` condition, with no
+      # `require`, so neither can be loaded from this CommonJS codebase. Taking
+      # either major would break the ncc bundle in dist/. Dependabot reopened
+      # these daily and each one had to be closed by hand; ignoring the major
+      # channel puts the constraint where the tool can see it. Patch and minor
+      # updates within the current major still come through.
+      #
+      # The exit (an ESM migration, or an upstream CJS-compatible http-client
+      # that accepts undici 7+) is tracked in #8, along with why the undici
+      # override in package.json exists. Remove these entries as part of that
+      # work, not before.
+      - dependency-name: "@actions/core"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@actions/http-client"
+        update-types: ["version-update:semver-major"]
