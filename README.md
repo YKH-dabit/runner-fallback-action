@@ -8,7 +8,15 @@ Github action to determine the availability of self-hosted runners, and fallback
 
 This action uses [GitHub API](https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#list-self-hosted-runners-for-a-repository) to check the statuses of self hosted-runners that match specific labels, and outputs the runner label(s), or a fallback runner if the self-hosted runner(s) is unavailable.
 
-The API used requires an access token with org admin rights, for example a classic Personal Access Token with org:admin scope selected.
+The API used requires a token that can read the runner list **for the context you point this action at**, and those contexts do not need the same amount of authority:
+
+| Context | Input | Token |
+| --- | --- | --- |
+| Repository runners | none (default) | A fine-grained PAT limited to that repository with `Administration: Read`, or a classic PAT with the `repo` scope |
+| Organization runners | `organization` | Org admin rights — a classic PAT with `admin:org`, or a fine-grained PAT with the organization's `Self-hosted runners: Read` permission |
+| Enterprise runners | `enterprise` | Enterprise admin rights — e.g. a classic PAT with `manage_runners:enterprise` |
+
+Prefer the narrowest token that covers your context. This token is handed to the action at runtime, so pointing an org-admin token at a single repository's runner list exposes far more authority than the call needs.
 
 This output can then used on the `runs-on` property of subsequent jobs.
 
@@ -104,6 +112,25 @@ jobs:
 - Here is an example of the action in use directly: <https://github.com/ankidroid/Anki-Android-Backend/blob/main/.github/workflows/build-release.yml>
 
 - Here is an example where the runner is used in a second preparation step that builds a dynamic job matrix where the runner is used in javascript: <https://github.com/ankidroid/Anki-Android-Backend/blob/main/.github/workflows/build-quick.yml>
+
+## Developing this action
+
+### Never register a self-hosted runner on this repository
+
+`test-output` in `.github/workflows/test.yml` runs on whatever labels this action resolves. With zero runners registered that can only ever be the fallback (a GitHub-hosted runner). Registering a self-hosted runner here would let labels chosen by a pull request place a job on our own hardware — on a public repository that turns a bad PR into arbitrary code execution on our machine. Nothing in CI needs one: the end-to-end tests assert the *fallback* path precisely because no primary runner exists.
+
+### The end-to-end tests are behind a review gate
+
+`test` and `test-multiple-labels` use `uses: ./`, which executes the checked-out `dist/index.js` of the run they are in, with `TEST_GITHUB_TOKEN` available. They are therefore gated behind the `e2e-tests` environment, which has a required reviewer: the run pauses and the secret cannot be read until someone approves it.
+
+**Approving that environment means agreeing to run the pull request's code with the token.** Before approving, read the diff to `dist/`, `package.json` scripts, and `.github/workflows/`. "Is this change a good idea" is the code review; this is a separate question.
+
+A few properties of that setup are deliberate and easy to break by accident:
+
+- `TEST_GITHUB_TOKEN` is an **environment** secret, not a repository secret. A repository secret would be readable by any run on any branch, which would put the token back within reach of unreviewed code.
+- It is a fine-grained PAT limited to this repository with `Administration: Read` and nothing else. `GITHUB_TOKEN` cannot substitute for it — the workflow `permissions:` key has no `administration` scope.
+- "Prevent self-review" is intentionally **off**. With a single maintainer the only possible reviewer is the PR author, and GitHub never requests review from the author, so enabling it would permanently block the e2e tests instead of adding a second pair of eyes. Revisit once there is a second collaborator.
+- If the secret is absent the token-dependent steps skip rather than fail, so a fork's CI is not permanently red. An expired or revoked token is a different case and fails loudly with a 401.
 
 ## Credit
 
