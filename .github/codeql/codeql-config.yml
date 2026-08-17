@@ -1,5 +1,23 @@
 name: "javascript-action CodeQL config"
 
-paths-ignore: 
+paths-ignore:
   - node_modules
   - dist
+
+# CodeQL's default threat model is `remote` only: process.env and process.argv
+# are not treated as attacker-controlled. For a GitHub Action that is backwards.
+# `core.getInput` reads INPUT_* environment variables, so the environment *is*
+# this program's untrusted input channel, and under the default model the
+# JavaScript security queries have essentially nothing to bite on here -- 87
+# rules ran against this repository and could not see a deliberately planted
+# `execSync('echo ' + process.env.X)` at all. With `local` added, the same
+# planted flaw is reported as js/command-line-injection (critical) and fails the
+# code scanning check.
+#
+# The trade-off is real: input-derived values legitimately flow into the API URL
+# and into log output, so this model can produce findings that the existing
+# validation (assertValidGithubName) already defends against. Those are worth
+# triaging one by one -- dismiss with a reason -- rather than running an analysis
+# that cannot see this program's actual attack surface.
+threat-models:
+  - local

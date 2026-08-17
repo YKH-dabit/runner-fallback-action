@@ -11,7 +11,14 @@ permissions:
   contents: read
 
 jobs:
-  # unit tests
+  # unit tests and lint
+  #
+  # `npm run lint` lives here rather than in a job of its own on purpose:
+  # `units` is already a required status check on `main` / `releases/*`
+  # (ruleset "protected-refs"), so folding lint into it makes lint blocking
+  # without touching the ruleset's required-check list. A separate `lint` job
+  # would report a check that nothing requires, which is the failure mode this
+  # repo has already been bitten by.
   units:
     runs-on: ubuntu-latest
     steps:
@@ -21,6 +28,8 @@ jobs:
     # install-time lifecycle scripts from untrusted PR content.
     - run: npm ci --ignore-scripts
     - run: npm test
+    # After the tests, so that a lint failure never hides a real test failure.
+    - run: npm run lint
 
   # Test the action works running from the graph.
   #
