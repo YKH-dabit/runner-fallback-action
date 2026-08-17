@@ -129,6 +129,7 @@ A few properties of that setup are deliberate and easy to break by accident:
 
 - `TEST_GITHUB_TOKEN` is an **environment** secret, not a repository secret. A repository secret would be readable by any run on any branch, which would put the token back within reach of unreviewed code.
 - It is a fine-grained PAT limited to this repository with `Administration: Read` and nothing else. `GITHUB_TOKEN` cannot substitute for it — the workflow `permissions:` key has no `administration` scope.
+- **The current token expires 2026-11-15** (issued 2026-08-17 with a 90-day lifetime). From that day the e2e jobs fail with `Failed to get runners. Status code: 401` instead of skipping, which is intended — but it means the fix is "rotate the token and update this date", not "debug CI". Rotating it means regenerating the PAT with the same permission and re-running `gh secret set TEST_GITHUB_TOKEN --env e2e-tests`.
 - "Prevent self-review" is intentionally **off**. With a single maintainer the only possible reviewer is the PR author, and GitHub never requests review from the author, so enabling it would permanently block the e2e tests instead of adding a second pair of eyes. Revisit once there is a second collaborator.
 - If the secret is absent the token-dependent steps skip rather than fail, so a fork's CI is not permanently red. An expired or revoked token is a different case and fails loudly with a 401.
 
