@@ -24,24 +24,53 @@ jobs:
 
   # Test the action works running from the graph.
   #
-  # Runs only on `push` (never `pull_request`): TEST_GITHUB_TOKEN needs
-  # org-admin scope (see README), and `uses: ./` executes *this run's own*
-  # dist/index.js. Handing an org-admin token to a pull_request-triggered
-  # run would let anyone who can push a branch exfiltrate it via a modified
-  # dist/index.js in the PR. Restricting to `push` means only code that has
-  # already landed on `main` / `releases/*` ever sees the token — an
-  # audited, revertible commit instead of a silent PR branch. `main` has no
-  # branch protection today, so this is a push-gate, not yet a review gate;
-  # once branch protection is enabled on those refs, this also means only
-  # reviewed code (see the follow-up on enabling it).
+  # Runs on both `pull_request` and `push`, gated behind the `e2e-tests`
+  # environment whose only protection rule is a required reviewer. There is no
+  # `if:` on the event: this workflow triggers on exactly those two events, so
+  # the gate here is the environment, not the trigger.
   #
-  # When TEST_GITHUB_TOKEN isn't configured (e.g. this fork, which
-  # deliberately hasn't been given the secret yet), the token-dependent
-  # steps are skipped instead of failing, so the job doesn't become a
-  # permanently-red required check that trains reviewers to ignore CI.
+  # `uses: ./` executes *this run's own* dist/index.js, so approving this job
+  # hands TEST_GITHUB_TOKEN to whatever code the run checked out. That is
+  # exactly why the environment exists: the run stops before the job starts and
+  # the secret stays unreadable until a human approves it.
+  #
+  # BEFORE APPROVING, read the run's diff to `dist/`, `package.json` scripts
+  # and `.github/workflows/`. What is being approved is not "is this change a
+  # good idea" but "am I willing to run this code with the token".
+  #
+  # Threat model notes, in the order people tend to ask about them:
+  #
+  #   * Fork PRs never receive secrets at all — GitHub does not pass them to
+  #     `pull_request` runs from a fork — so the token-dependent steps below
+  #     simply skip there. The environment gate is what protects *same-repo*
+  #     branches.
+  #   * TEST_GITHUB_TOKEN is a fine-grained PAT limited to this one repository
+  #     with `Administration: Read` and nothing else. That is the least the
+  #     runners API accepts for `repos/{owner}/{repo}/actions/runners`, which
+  #     is the path this action takes when no `organization` / `enterprise`
+  #     input is given. It cannot be replaced by GITHUB_TOKEN: the workflow
+  #     `permissions:` key has no `administration` scope.
+  #   * It is an *environment* secret, deliberately not a repository secret. A
+  #     repository secret is readable by any run on any branch, which would put
+  #     the token back within reach of unreviewed code and make this gate
+  #     decorative.
+  #   * `main` and `releases/*` are covered by the `protected-refs` ruleset
+  #     (pull request required, no bypass actors), so the `push` runs here only
+  #     ever execute code that landed through a PR.
+  #   * DO NOT register a self-hosted runner on this repository. `test-output`
+  #     below runs on whatever labels this action resolves, and with zero
+  #     runners registered that can only ever be the fallback. Registering one
+  #     would let labels chosen by a PR place a job on our own hardware.
+  #
+  # When TEST_GITHUB_TOKEN isn't configured (e.g. a fork, or a clone that
+  # hasn't been given the secret), the token-dependent steps are skipped rather
+  # than failing, so this job doesn't become a permanently-red check that
+  # trains reviewers to ignore CI. A token that is present but expired or
+  # revoked is a different case and fails loudly with a 401 — that is
+  # intended, a dead token should be noisy rather than silently skipped.
   test:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    environment: e2e-tests
     outputs:
       use-runner: ${{ steps.test-action.outputs.use-runner }}
     steps:
@@ -66,6 +95,11 @@ jobs:
       if: steps.check-token.outputs.has-token != 'true'
       run: echo "::notice::TEST_GITHUB_TOKEN is not configured on this repo/fork; skipping token-dependent steps in the 'test' job."
 
+  # This repository has zero registered runners, so `use-runner` always
+  # resolves to the fallback and this job always lands on a GitHub-hosted
+  # runner — see the "DO NOT register a self-hosted runner" note above for why
+  # that must stay true. It reads no secrets, so it deliberately does not join
+  # the `e2e-tests` environment and needs no approval of its own.
   test-output:
     needs: test
     # test's steps are skipped whenever the secret is absent, which leaves
@@ -76,10 +110,11 @@ jobs:
       - name: Do something
         run: echo "Doing something on ${{ needs.test.outputs.use-runner }}"
 
-  # Same rationale and skip behavior as `test` above.
+  # Same rationale, same gate, same skip behavior as `test` above — read that
+  # comment block before changing anything here.
   test-multiple-labels:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    environment: e2e-tests
     outputs:
       use-runner: ${{ steps.test-action.outputs.use-runner }}
     steps:
