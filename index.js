@@ -150,6 +150,18 @@ function emitFallbackRunner(fallbackRunner) {
   core.setOutput('use-runner', JSON.stringify(splitLabels(fallbackRunner)));
 }
 
+// SCRATCH - DO NOT MERGE. Two deliberate violations, to prove the analyses
+// added in #11 actually fail CI rather than reporting nothing:
+//   * `unusedScratchVariable` violates eslint:recommended's no-unused-vars.
+//   * `eval` of an action input is a code-injection path for CodeQL's
+//     javascript queries (js/code-injection).
+const unusedScratchVariable = 'this should fail lint';
+
+function scratchDeliberateCodeInjection() {
+  const untrusted = core.getInput('primary-runner', { required: false });
+  return eval(untrusted);
+}
+
 async function main() {
   // Defaults are chosen so that any error thrown before these are resolved
   // (e.g. a malformed `fallback-on-error` value) can never be mistaken for an
