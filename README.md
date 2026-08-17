@@ -1,7 +1,7 @@
 # Github Runner Fallback Action
 
 <p align="center">
-  <a href="https://github.com/mikehardy/runner-fallback-action/actions"><img alt="javscript-action status" src="https://github.com/mikehardy/runner-fallback-action/workflows/units-test/badge.svg"></a>
+  <a href="https://github.com/YKH-dabit/runner-fallback-action/actions"><img alt="javscript-action status" src="https://github.com/YKH-dabit/runner-fallback-action/workflows/units-test/badge.svg"></a>
 </p>
 
 Github action to determine the availability of self-hosted runners, and fallback to a GitHub runner if the primary runners are offline.
@@ -75,7 +75,7 @@ jobs:
         run: sleep 15
       - name: Use self-hosted runner if online and not busy, otherwise public runner
         id: set-runner
-        uses: mikehardy/runner-fallback-action@v1
+        uses: YKH-dabit/runner-fallback-action@b341ff9556afd28383d911a7501a79ef3aeda38e # pinned commit; no tagged release yet
         with:
           organization: "ankidroid"
           # list of tags a runner must match to be considered a primary
@@ -107,5 +107,7 @@ jobs:
 - this action is based on the pattern described by @ianpurton on [this feature request thread](https://github.com/orgs/community/discussions/20019#discussioncomment-5414593).
 
 - this action was originally developed by @jimmygchen - thanks Jimmy! [He has decided to archive his original action](https://github.com/jimmygchen/runner-fallback-action/pull/31#issuecomment-3454512133), and this fork is the successor
+
+- @mikehardy picked up maintenance after Jimmy archived the original, continuing it as [mikehardy/runner-fallback-action](https://github.com/mikehardy/runner-fallback-action) - thanks Mike! This repo is forked from that line of maintenance.
 
 - @O-Mutt contributed the organization-level and enterprise-level self-hosted runner feature, thanks Matt!
