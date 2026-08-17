@@ -2,6 +2,19 @@ const { checkRunner } = require('./index');
 const mockGetJson = jest.fn();
 
 jest.mock('@actions/http-client', () => {
+  // Mirrors the real @actions/http-client shape closely enough for tests:
+  // getJson() throws this for 401 / 403 / 5xx, carrying `.statusCode` and a
+  // GitHub-supplied `.message` - see `_processResponse` in the real package.
+  // Defined inside the factory because jest.mock() factories may not close
+  // over out-of-scope variables.
+  class MockHttpClientError extends Error {
+    constructor(message, statusCode) {
+      super(message);
+      this.name = 'HttpClientError';
+      this.statusCode = statusCode;
+    }
+  }
+
   return {
     HttpClient: jest.fn().mockImplementation(() => {
       return {
@@ -9,8 +22,13 @@ jest.mock('@actions/http-client', () => {
       };
     }),
     BearerCredentialHandler: jest.fn(),
+    HttpClientError: MockHttpClientError,
   };
 });
+
+// The mocked module's own export, so every test constructs the same class
+// `index.js`'s `catch (httpError)` will see.
+const { HttpClientError } = require('@actions/http-client');
 
 jest.mock('@actions/core', () => ({
   getInput: jest.fn(),
@@ -221,6 +239,69 @@ describe('checkRunner', () => {
       );
     });
   });
+
+  describe('error path unification', () => {
+    it.each([401, 403, 500, 503])(
+      'throws a unified error when getJson rejects with an HttpClientError (status %i, the throw source)',
+      async (statusCode) => {
+        mockGetJson.mockRejectedValue(new HttpClientError('Bad credentials', statusCode));
+
+        await expect(
+          checkRunner({
+            token: 'fake-token',
+            apiPath: 'repos/fake-owner/fake-repo/actions/runners',
+            primaryRunnerLabels: ['self-hosted', 'linux'],
+            fallbackRunner: 'ubuntu-latest',
+          })
+        ).rejects.toThrow(`Failed to get runners. Status code: ${statusCode}: Bad credentials`);
+      }
+    );
+
+    it('throws a unified error when getJson resolves with a non-200 statusCode (404, the statusCode source)', async () => {
+      mockGetJson.mockResolvedValue({ statusCode: 404, result: null });
+
+      await expect(
+        checkRunner({
+          token: 'fake-token',
+          apiPath: 'repos/fake-owner/fake-repo/actions/runners',
+          primaryRunnerLabels: ['self-hosted', 'linux'],
+          fallbackRunner: 'ubuntu-latest',
+        })
+      ).rejects.toThrow('Failed to get runners. Status code: 404');
+    });
+
+    it('includes the GitHub-supplied detail when a non-200 statusCode response carries a body message', async () => {
+      mockGetJson.mockResolvedValue({ statusCode: 404, result: { message: 'Not Found' } });
+
+      await expect(
+        checkRunner({
+          token: 'fake-token',
+          apiPath: 'repos/fake-owner/fake-repo/actions/runners',
+          primaryRunnerLabels: ['self-hosted', 'linux'],
+          fallbackRunner: 'ubuntu-latest',
+        })
+      ).rejects.toThrow('Failed to get runners. Status code: 404: Not Found');
+    });
+
+    it('never includes the Authorization header or token in the thrown error message', async () => {
+      mockGetJson.mockRejectedValue(new HttpClientError('Bad credentials', 401));
+
+      let thrown;
+      try {
+        await checkRunner({
+          token: 'super-secret-token',
+          apiPath: 'repos/fake-owner/fake-repo/actions/runners',
+          primaryRunnerLabels: ['self-hosted', 'linux'],
+          fallbackRunner: 'ubuntu-latest',
+        });
+      } catch (err) {
+        thrown = err;
+      }
+
+      expect(thrown).toBeDefined();
+      expect(thrown.message).not.toContain('super-secret-token');
+    });
+  });
 });
 
 describe('main', () => {
@@ -337,7 +418,7 @@ describe('main', () => {
     core.getBooleanInput.mockReturnValue(true);
     setInputs();
     core.summary.write.mockRejectedValue(new Error('ENOENT: no summary file'));
-    mockGetJson.mockResolvedValue({ statusCode: 500 });
+    mockGetJson.mockRejectedValue(new HttpClientError('Internal Server Error', 500));
 
     await main();
 
@@ -349,7 +430,7 @@ describe('main', () => {
   it('splits a comma-separated fallback-runner on the error path just like the success path', async () => {
     core.getBooleanInput.mockReturnValue(true);
     setInputs({ 'fallback-runner': 'linux,x64' });
-    mockGetJson.mockResolvedValue({ statusCode: 500 });
+    mockGetJson.mockRejectedValue(new HttpClientError('Internal Server Error', 500));
 
     await main();
 
@@ -360,12 +441,48 @@ describe('main', () => {
   it('trims whitespace from a comma-separated fallback-runner on the error path just like the success path', async () => {
     core.getBooleanInput.mockReturnValue(true);
     setInputs({ 'fallback-runner': 'linux, x64' });
-    mockGetJson.mockResolvedValue({ statusCode: 500 });
+    mockGetJson.mockRejectedValue(new HttpClientError('Internal Server Error', 500));
 
     await main();
 
     expect(core.setFailed).not.toHaveBeenCalled();
     expect(core.setOutput).toHaveBeenCalledWith('use-runner', '["linux","x64"]');
+  });
+
+  it('falls back cleanly (exit 0) when getJson resolves with a non-200 statusCode (404, the statusCode source)', async () => {
+    core.getBooleanInput.mockReturnValue(true);
+    setInputs();
+    mockGetJson.mockResolvedValue({ statusCode: 404, result: null });
+
+    await main();
+
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.setOutput).toHaveBeenCalledWith('use-runner', '["ubuntu-latest"]');
+  });
+
+  it.each([401, 403, 500, 503])(
+    'falls back cleanly (exit 0) when getJson rejects with an HttpClientError (status %i, the throw source)',
+    async (statusCode) => {
+      core.getBooleanInput.mockReturnValue(true);
+      setInputs();
+      mockGetJson.mockRejectedValue(new HttpClientError('Bad credentials', statusCode));
+
+      await main();
+
+      expect(core.setFailed).not.toHaveBeenCalled();
+      expect(core.setOutput).toHaveBeenCalledWith('use-runner', '["ubuntu-latest"]');
+    }
+  );
+
+  it('setFailed with a unified, readable error (status + GitHub detail) when fallback-on-error is false', async () => {
+    core.getBooleanInput.mockReturnValue(false);
+    setInputs();
+    mockGetJson.mockRejectedValue(new HttpClientError('Bad credentials', 401));
+
+    await main();
+
+    expect(core.setOutput).not.toHaveBeenCalled();
+    expect(core.setFailed).toHaveBeenCalledWith('Failed to get runners. Status code: 401: Bad credentials');
   });
 
   it('never leaves an unhandled rejection when checkRunner itself throws', async () => {
@@ -374,7 +491,19 @@ describe('main', () => {
     mockGetJson.mockRejectedValue(new Error('network exploded'));
 
     await expect(main()).resolves.toBeUndefined();
-    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining('network exploded'));
+    expect(core.setFailed).toHaveBeenCalledWith('Failed to get runners: network exploded');
+  });
+
+  it('formats a transport-level rejection (no statusCode, e.g. DNS/TLS failure) without a bogus status code', async () => {
+    core.getBooleanInput.mockReturnValue(false);
+    setInputs();
+    mockGetJson.mockRejectedValue(new Error('getaddrinfo ENOTFOUND api.github.com'));
+
+    await main();
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      'Failed to get runners: getaddrinfo ENOTFOUND api.github.com'
+    );
   });
 
   it('emits the primary runner on the success path when it is online', async () => {

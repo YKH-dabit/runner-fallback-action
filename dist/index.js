@@ -56,6 +56,17 @@ function parsePrimariesRequired(rawValue) {
   return parsed;
 }
 
+// Single error shape for every way the runners API call can fail: `getJson`
+// *throws* an `HttpClientError` for 401 / 403 / 5xx, but *resolves* with a
+// non-200 `statusCode` (and no error) for 404 - the two are the same failure
+// ("could not get the runner list") wearing different clothes, and callers
+// must not have to know which one they're looking at. `detail` carries
+// GitHub's own explanation when one is available; it is deliberately never
+// the raw request headers, so the token can never end up in this message.
+function formatRunnersFetchError(statusCode, detail) {
+  return `Failed to get runners. Status code: ${statusCode}${detail ? `: ${detail}` : ''}`;
+}
+
 async function checkRunner({
   token,
   primaryRunnerLabels,
@@ -68,15 +79,26 @@ async function checkRunner({
     Authorization: `Bearer ${token}`,
   };
 
-  const response = await http.getJson(
-    `https://api.github.com/${apiPath}`,
-    headers
-  );
+  let response;
+  try {
+    response = await http.getJson(
+      `https://api.github.com/${apiPath}`,
+      headers
+    );
+  } catch (httpError) {
+    // 401 / 403 / 5xx land here as a thrown HttpClientError. Transport
+    // failures (DNS, TLS, timeout) reject with no statusCode - those keep
+    // their own message rather than claiming a status code they don't have.
+    if (typeof httpError.statusCode !== 'number') {
+      throw new Error(`Failed to get runners: ${httpError.message || httpError}`);
+    }
+    throw new Error(formatRunnersFetchError(httpError.statusCode, httpError.message));
+  }
 
   if (response.statusCode !== 200) {
-    return {
-      error: `Failed to get runners. Status code: ${response.statusCode}`,
-    };
+    // 404 is the one case @actions/http-client resolves instead of throwing.
+    const detail = response.result && response.result.message;
+    throw new Error(formatRunnersFetchError(response.statusCode, detail));
   }
 
   const runners = response.result.runners || [];
@@ -189,11 +211,7 @@ async function main() {
       primariesRequired: parsePrimariesRequired(core.getInput('primaries-required', { required: false })),
     };
 
-    const { useRunner, primaryIsOnline, sufficientPrimaries, error } = await checkRunner(inputs);
-
-    if (error) {
-      throw new Error(error);
-    }
+    const { useRunner, primaryIsOnline, sufficientPrimaries } = await checkRunner(inputs);
 
     core.info(`Primary runner is online: ${primaryIsOnline}`);
     core.info(`Sufficient primary runners available: ${sufficientPrimaries}`);
