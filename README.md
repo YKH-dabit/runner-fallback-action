@@ -134,7 +134,7 @@ A few properties of that setup are deliberate and easy to break by accident:
 - `TEST_GITHUB_TOKEN` is an **environment** secret, not a repository secret. A repository secret would be readable by any run on any branch. The environment's branch policy is what keeps it on `main` / `releases/*`.
 - Do not switch `test.yml` to `pull_request_target`. That would run fork PRs with this repository's secrets.
 - It is a fine-grained PAT limited to this repository with `Administration: Read` and nothing else. `GITHUB_TOKEN` cannot substitute for it, because the workflow `permissions:` key has no `administration` scope.
-- **The current token was rotated on 2026-11-23.** When it expires, the e2e jobs on `main` fail with `Failed to get runners. Status code: 401` instead of skipping. That is intended, but it means the fix is "rotate the token and update this date", not "debug CI". Rotating means regenerating the PAT with the same permission and re-running `gh secret set TEST_GITHUB_TOKEN --env e2e-tests`.
+- **The current token expires 2027-02-21** (rotated 2026-11-23 with a 90-day lifetime). From that day the e2e jobs on `main` fail with `Failed to get runners. Status code: 401` instead of skipping. That is intended, but it means the fix is "rotate the token and update this date", not "debug CI". Rotating means regenerating the PAT with the same permission and re-running `gh secret set TEST_GITHUB_TOKEN --env e2e-tests`.
 - If the secret is absent, for example on a fork's own `main`, the token-dependent steps skip rather than fail, so that CI is not permanently red. An expired or revoked token is a different case and fails loudly with a 401.
 
 ## Credit
