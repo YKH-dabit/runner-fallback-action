@@ -1,14 +1,47 @@
 version: 2
 updates:
+  # Weekly, and grouped, so that each week's updates arrive as one PR per group
+  # rather than one per dependency. Every PR's e2e jobs wait for a manual
+  # approval of the `e2e-tests` environment, and a run older than 30 days can no
+  # longer be re-run, so a pile of single-dependency PRs ages into ones that can
+  # only be refreshed by a rebase.
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: daily
+      interval: weekly
+    groups:
+      # One group for every action. github/codeql-action's init / analyze /
+      # autobuild steps must all run the same version (CodeQL fails the run
+      # otherwise), and they used to arrive as three PRs that each failed alone.
+      actions:
+        patterns: ["*"]
 
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: daily
+      interval: weekly
+    groups:
+      # Runtime dependencies are bundled into dist/. Dependabot cannot rebuild
+      # it, so these PRs fail check-dist until a maintainer pushes the rebuild
+      # (npm ci && npm run prepare). Kept apart from the dev group so that
+      # rebuild happens on a PR that contains only runtime changes.
+      npm-production:
+        dependency-type: production
+        update-types: [minor, patch]
+      # Dev tooling never reaches dist/. Majors still come one per PR, since
+      # they are the bumps that tend to need code changes (eslint, jest).
+      npm-development:
+        dependency-type: development
+        update-types: [minor, patch]
+      # Security updates are not grouped unless a group opts in with
+      # applies-to. Split the same way as above, so a runtime fix (which needs
+      # the dist/ rebuild) never shares a PR with dev-tree fixes.
+      npm-security-production:
+        applies-to: security-updates
+        dependency-type: production
+      npm-security-development:
+        applies-to: security-updates
+        dependency-type: development
     ignore:
       # @actions/core v3 and @actions/http-client v4 are ESM-only: both declare
       # `"type": "module"` and expose only an `import` condition, with no
