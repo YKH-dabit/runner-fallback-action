@@ -119,19 +119,23 @@ jobs:
 
 `test-output` in `.github/workflows/test.yml` runs on whatever labels this action resolves. With zero runners registered that can only ever be the fallback (a GitHub-hosted runner). Registering a self-hosted runner here would let labels chosen by a pull request place a job on our own hardware — on a public repository that turns a bad PR into arbitrary code execution on our machine. Nothing in CI needs one: the end-to-end tests assert the *fallback* path precisely because no primary runner exists.
 
-### The end-to-end tests are behind a review gate
+### The end-to-end tests run only on main
 
-`test` and `test-multiple-labels` use `uses: ./`, which executes the checked-out `dist/index.js` of the run they are in, with `TEST_GITHUB_TOKEN` available. They are therefore gated behind the `e2e-tests` environment, which has a required reviewer: the run pauses and the secret cannot be read until someone approves it.
+`test` and `test-multiple-labels` use `uses: ./`, which executes the checked-out `dist/index.js` of the run they are in, with `TEST_GITHUB_TOKEN` available. So they run only on `push` to `main` and `releases/*`, never on pull requests, and the token is reachable only from code that already landed through a PR.
 
-**Approving that environment means agreeing to run the pull request's code with the token.** Before approving, read the diff to `dist/`, `package.json` scripts, and `.github/workflows/`. "Is this change a good idea" is the code review; this is a separate question.
+The guard is the `e2e-tests` environment, not the workflow's `if:`. The environment has a deployment branch policy of `main` and `releases/*` and no required reviewer. A job on any other ref that names the environment is refused before it starts, so editing the workflow on a branch cannot reach the secret. `main` and `releases/*` themselves are covered by the `protected-refs` ruleset (pull request required, no bypass actors).
+
+The cost is that an e2e failure shows up after merge instead of before. Consumers pin tags or SHAs, and [RELEASING.md](RELEASING.md) requires a green `units-test` run on `main` before tagging, so a red `main` never reaches them.
+
+This replaced a required-reviewer gate on pull request runs. With a single maintainer that gate was self-approval. On Dependabot PRs it gated nothing: runs Dependabot triggers cannot read Actions or environment secrets, so after every approval the token-dependent steps just skipped.
 
 A few properties of that setup are deliberate and easy to break by accident:
 
-- `TEST_GITHUB_TOKEN` is an **environment** secret, not a repository secret. A repository secret would be readable by any run on any branch, which would put the token back within reach of unreviewed code.
-- It is a fine-grained PAT limited to this repository with `Administration: Read` and nothing else. `GITHUB_TOKEN` cannot substitute for it — the workflow `permissions:` key has no `administration` scope.
-- **The current token expires 2026-11-15** (issued 2026-08-17 with a 90-day lifetime). From that day the e2e jobs fail with `Failed to get runners. Status code: 401` instead of skipping, which is intended — but it means the fix is "rotate the token and update this date", not "debug CI". Rotating it means regenerating the PAT with the same permission and re-running `gh secret set TEST_GITHUB_TOKEN --env e2e-tests`.
-- "Prevent self-review" is intentionally **off**. With a single maintainer the only possible reviewer is the PR author, and GitHub never requests review from the author, so enabling it would permanently block the e2e tests instead of adding a second pair of eyes. Revisit once there is a second collaborator.
-- If the secret is absent the token-dependent steps skip rather than fail, so a fork's CI is not permanently red. An expired or revoked token is a different case and fails loudly with a 401.
+- `TEST_GITHUB_TOKEN` is an **environment** secret, not a repository secret. A repository secret would be readable by any run on any branch. The environment's branch policy is what keeps it on `main` / `releases/*`.
+- Do not switch `test.yml` to `pull_request_target`. That would run fork PRs with this repository's secrets.
+- It is a fine-grained PAT limited to this repository with `Administration: Read` and nothing else. `GITHUB_TOKEN` cannot substitute for it, because the workflow `permissions:` key has no `administration` scope.
+- **The current token was rotated on 2026-11-23.** When it expires, the e2e jobs on `main` fail with `Failed to get runners. Status code: 401` instead of skipping. That is intended, but it means the fix is "rotate the token and update this date", not "debug CI". Rotating means regenerating the PAT with the same permission and re-running `gh secret set TEST_GITHUB_TOKEN --env e2e-tests`.
+- If the secret is absent, for example on a fork's own `main`, the token-dependent steps skip rather than fail, so that CI is not permanently red. An expired or revoked token is a different case and fails loudly with a 401.
 
 ## Credit
 

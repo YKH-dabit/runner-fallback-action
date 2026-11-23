@@ -38,7 +38,10 @@ mandatory on every release.
 
    Merge the PR to `main`. Every step below operates on that merged commit.
 
-2. **Tag the release commit.** Tag the `main` commit from step 1 (which already carries the version
+2. **Tag the release commit.** First confirm that the `units-test` run for that commit on `main` is
+   green, including `test` and `test-multiple-labels`. Those end-to-end jobs run only after merge (see
+   README, "The end-to-end tests run only on main"), so this is the first place they can fail. Then tag
+   the `main` commit from step 1 (which already carries the version
    bump, any rebuilt `dist/`, and any major-bump README change):
 
    ```sh
